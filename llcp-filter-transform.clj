@@ -538,13 +538,17 @@
 (defn parse-int
   [s]
   (Integer/parseInt s))
+;  (try (Integer/parseInt s)
+;    (catch NumberFormatException nfe nil)))
 
 ; BMIs are supposed to be coded with a 4 fixed pointer number with 2 implicit
 ; decimal places.  Some are miscoded with floating point instead, and the actual
 ; magnitude.  If < 100, assume it's mis-coded
 (defn parse-bmi
   [s]
-  (let [f (Float/parseFloat s)]
+  (let [f (-> s
+            (.replace " " ".")
+            (Float/parseFloat))]
     (if (>= 100 f)
       (/ f 100)
       f)))
@@ -553,9 +557,11 @@
 ; are mis-formatted with blanks instead of a 0 between the hundreds and ones
 ; place
 ; Replace the " " with 0's
-(defn parse-int-blanks-to-zeroes
+(defn parse-int-weird-chars-to-zeroes
   [s]
-  (parse-int (.replace s " " "0")))
+  (-> s
+    (.replace " " "0")
+    parse-int))
 
 (defn decode-activity-frequency
   [n]
@@ -574,9 +580,11 @@
   [backup-fn]
   (comp
     (fn [n]
-      (or (decode-activity-frequency n)
-          (backup-fn n)))
-    parse-int-blanks-to-zeroes))
+      (if n
+        (or (decode-activity-frequency n)
+            (backup-fn n))
+      n))
+    parse-int-weird-chars-to-zeroes))
 
 (def str-to-activity-frequency
   (str-to-activity-frequency-or (fn [_] nil)))
@@ -758,9 +766,10 @@
   [pred m]
   (into {} (filter #(pred (% 0)) m)))
 
-(def relevant-fields (filter-keys #{:AGE :EXEROFT1 :ALCDAY6} all-relevant-fields))
-
-(? relevant-fields)
+(def relevant-fields all-relevant-fields)
+;  (filter-keys #{
+                                   ;; :AGE
+                                    ;:EXEROFT1 :ALCDAY6} all-relevant-fields))
 
 (defn keyset-after-filter-vals
   [pred m]
@@ -813,8 +822,8 @@
                (if-let [val 
                         (try ((v :interp-fn) field)
                           (catch NumberFormatException nfe 
-                            (throw (Exception. field nfe))))]
-                           ; :nfe-error))]
+                            ;(throw (Exception. (str "k: " k " v: " field) nfe))))]
+                            [:nfe-error field]))]
                  ;((v :val-to-str) val)
                  val :nil-error))])))
 
@@ -823,11 +832,12 @@
   (reduce (fn [accum-counts k]
             (update-in accum-counts [k] inc)) counts xs))
 
-
 (defn accum-record-validity
   [accum nxt]
-  (let [nfe-fields (keyset-after-filter-vals #(= :nil-error %) nxt)
-        nil-fields (keyset-after-filter-vals #(= :nfe-error %) nxt)
+  (let [nil-fields (keyset-after-filter-vals #(= :nil-error %) nxt)
+        nfe-fields (keyset-after-filter-vals #(if (vector? %1)
+                                                (= :nfe-error (%1 0))
+                                                false) nxt)
         blank-fields (into #{} (for [[k v] nxt
                                      :when (=
                                              (get-in relevant-fields [k :blank 0])
@@ -837,6 +847,12 @@
         invalid-count (count invalid-fields)]
     (-> accum
       (update-in [:total-seen] inc)
+      (update-in [:nfe-sets] (fn [field-map]
+                               (reduce (fn [accum-map k]
+                                         (update-in accum-map [k]
+                                                    conj (nxt k)))
+                                       field-map
+                                       nfe-fields)))
       (update-in [:nfe-by-field-histo] inc-counts-for-keys nfe-fields)
       (update-in [:nil-by-field-histo] inc-counts-for-keys nil-fields)
       (update-in [:blank-by-field-histo] inc-counts-for-keys blank-fields)
@@ -863,11 +879,23 @@
 (def field-histogram
   (into {} (map (fn [k] [k 0]) field-set)))
 
+(def field-sets
+  (into {} (map (fn [k] [k #{}]) field-set)))
+
+(defn transform-to-common-invalids
+  [rec]
+  (into {} (for [[k v] rec]
+             [k (if (or
+                      (= :nfe-error v)
+                      (= :nil-error v)
+                      (= (get-in relevant-fields [k :blank 0]) v)) -1 v)])))
+
 (defn summarize-record-validity
   [record-seq]
   (reduce
     accum-record-validity
     {:total-seen 0
+     :nfe-sets field-sets
      ; Basically no records were all valid
      ; :total-with-all-valid 0
      :nfe-by-field-histo field-histogram
@@ -884,7 +912,8 @@
   (->> rdr
     buff-seq
     (map buff-to-relevant-fields)
-    ; (take 100)
+    (map transform-to-common-invalids)
+    (take 1000)
     summarize-record-validity
     pp/pprint))
 
