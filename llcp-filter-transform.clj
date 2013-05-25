@@ -1,10 +1,14 @@
 (use '[leiningen.exec :only (deps)])
 
-(deps '[[org.clojure/tools.cli "0.2.2"]])
+(deps '[[org.clojure/tools.cli "0.2.2"]
+        [bytebuffer "0.2.0"]])
 
+(import 'java.io.File)
+(import 'java.io.FileOutputStream)
 (use 'clojure.java.io)
 (use 'clojure.string)
 (use '[clojure.tools.cli :only [cli]])
+(use '[bytebuffer.buff :as bbb])
 (require '[clojure.set :as set])
 (require '[clojure.pprint :as pp])
 
@@ -13,6 +17,12 @@
   `(let [x# ~val]
      (println '~val " is " x#)
      x#))
+
+(defmacro do-let
+  [[binding-form init-expr] & body]
+  `(let [~binding-form ~init-expr]
+     ~@body
+     ~binding-form))
 
 (def record-extraction-map
   {:SLEPDRIV {:starting-col 306, :field-len 1},
@@ -549,9 +559,15 @@
   (let [f (-> s
             (.replace " " ".")
             (Float/parseFloat))]
-    (if (>= 100 f)
-      (/ f 100)
-      f)))
+    (if (< 100 f) (int (* f 100)) f)))
+
+(defn parse-numeric
+  [s]
+  (try (Integer/parseInt s)
+    ; If at least some of s is numeric, try to parse as BMI, which may be a FP
+    ; else just bail and pass up the NFE
+    (catch NumberFormatException nfe
+      (if (some #(Character/isDigit %) s) (parse-bmi s) (throw nfe)))))
 
 ; Some activity frequencies (which use the hundred's place as a code)
 ; are mis-formatted with blanks instead of a 0 between the hundreds and ones
@@ -570,24 +586,17 @@
     (and (> n 200) (< n 300)) [(- n 200) :days-in-past-30-days]
     :else nil))
 
-(defn parse-int-then
-  [next-fn]
-  (comp next-fn parse-int))
-
-(defn str-to-activity-frequency-or
-  "Return a function that attempts to interpret a string as an integer and then
-  as an activity frequency.  If it can't interpret the number as a standard activity frequency encoding, it passes it to the user-provided cb for special value codings"
+(defn num-to-activity-frequency-or
+  "Return a function that attempts to interpret a number as coded activity frequency
+  If it can't interpret the number as a standard activity frequency encoding, it passes it to the user-provided cb for special value codings"
   [backup-fn]
-  (comp
-    (fn [n]
-      (if n
-        (or (decode-activity-frequency n)
-            (backup-fn n))
-      n))
-    parse-int-weird-chars-to-zeroes))
+  (fn [n]
+    (if n
+      (or (decode-activity-frequency n)
+          (backup-fn n)) n)))
 
-(def str-to-activity-frequency
-  (str-to-activity-frequency-or (fn [_] nil)))
+(def num-to-activity-frequency
+  (num-to-activity-frequency-or (fn [_] nil)))
 
 (defn activity-frequency-to-str
   [v]
@@ -607,7 +616,6 @@
 (def all-relevant-fields
   ; General health
   {:GENHLTH {:desc "Would you say in general your health is"
-             :interp-fn parse-int
              :blank [nil "Not asked or missing"]
              :val-to-str
              {1 "Excellent"
@@ -620,11 +628,9 @@
 
    ; Demographics
    :_STATE {:desc "State FIPS Code"
-            :interp-fn parse-int
             :val-to-str code-to-state-name}
    :EDUCA {:desc "What is the highest grade or year of school you completed?"
            :blank [nil "Not asked or missing"]
-           :interp-fn parse-int
            :val-to-str
            {1 "Never attended school or only kindergarten"
             2 "Grades 1 through 8 (Elementary)"
@@ -635,7 +641,6 @@
             9 "Refused"}}
    :EMPLOY {:desc "Are you currenly (employment status)"
             :blank [nil "Not asked or missing"]
-            :interp-fn parse-int
             :val-to-str
             {1 "Employed for wages"
              2 "Self-employed"
@@ -648,7 +653,6 @@
              9 "Refused"}}
    :INCOME2 {:desc "Is your annual household income from all sources"
              :blank [nil "Not asked or missing"]
-             :interp-fn parse-int
              :val-to-str 
              {1 "Less than $10,000"
               2 "Less than $15,000 ($10,000 to less than $15,000)"
@@ -662,7 +666,6 @@
               99 "Refused"}}
    :ORACE2 {:desc "Which one of these groups would you say best represents your race?"
             :blank [nil "Not asked or missing"]
-            :interp-fn parse-int
             :val-to-str
             {1 "White"
              2 "Black or African American"
@@ -675,13 +678,12 @@
              9 "Refused"}}
    :AGE {:desc "What is your age?"
          :blank [nil not-asked-or-missing]
-         :interp-fn (parse-int-then
-                      (fn [n]
-                        (cond n
-                          (= n 7) :didnt-know-not-sure
-                          (= n 9) :refused
-                          (n < 18) nil
-                          n)))
+         :interp-fn (fn [n]
+                      (cond n
+                            (= n 7) :didnt-know-not-sure
+                            (= n 9) :refused
+                            (n < 18) nil
+                            n))
          :val-to-str (fn [v]
                        (case v
                          :didnt-know-not-sure "Didn't know/Not sure"
@@ -690,7 +692,7 @@
    ; behaviors
    :ALCDAY5 {:desc "During the past 30 days, how many days per week or per month did you have at least one drink of any alcoholic beverage such as beer, wine, a malt beverage or liquor?"
              :blank [nil "Not asked or missing"]
-             :interp-fn str-to-activity-frequency
+             :interp-fn num-to-activity-frequency
              :val-to-str activity-frequency-to-str}
 ;             :interp-fn
 ;             (str-to-activity-frequency-or
@@ -707,7 +709,7 @@
 
    :EXEROFT1 {:desc "How many times per week or per month did you take part in this activity during the past month?"
               :blank [nil not-asked-or-missing]
-              :interp-fn str-to-activity-frequency
+              :interp-fn num-to-activity-frequency
               :val-to-str activity-frequency-to-str}
 ;              :interp-fn (str-to-activity-frequency-or
 ;                           (fn [n]
@@ -722,7 +724,6 @@
 ;                     (vector? v) (decode-activity-frequency v))))}
   :SMOKDAY2 {:desc "Do you now smoke cigarettes every day, some days, or not at all?"
              :blank [nil not-asked-or-missing]
-             :interp-fn parse-int
              :val-to-str
              {1 "Every day"
               2 "Some days"
@@ -733,7 +734,6 @@
   :_BMI5 {:desc "Body Mass Index (BMI)"
           :blank [nil dont-know-refused-missing]
           ; Note, 2 implied decimal places
-          :interp-fn parse-bmi
           :val-to-str str}
 
   ; Chronic conditions
@@ -761,6 +761,10 @@
 (defn filter-vals
   [pred m]
   (into {} (filter #(pred (% 1)) m)))
+
+(defn map-vals
+  [f mp]
+  (into {} (for [[k v] mp] [k (f v)])))
 
 (defn filter-keys
   [pred m]
@@ -806,26 +810,29 @@
     (if (= record-len (.read rdr buff 0 record-len))
       (cons buff (lazy-seq (buff-seq rdr))) [])))
 
-(defn buff-to-relevant-fields
+(def blank-num -1)
+
+(defn buff-to-relevant-fields-numeric-records
   [buff]
   (into {}
         (for [[k v] relevant-fields
               :let [extractor (record-extraction-map k)
-                    blnk (get-in v [:blank 0])
                     field (trim (apply str (for [idx 
                                                  (range (extractor :starting-col)
                                                         (+ (extractor :starting-col)
                                                            (extractor :field-len)))]
                                              (aget buff idx))))]]
           [k (if (= field "")
-               blnk
-               (if-let [val 
-                        (try ((v :interp-fn) field)
-                          (catch NumberFormatException nfe 
-                            ;(throw (Exception. (str "k: " k " v: " field) nfe))))]
-                            [:nfe-error field]))]
-                 ;((v :val-to-str) val)
-                 val :nil-error))])))
+               blank-num
+               (try (parse-numeric field)
+                 (catch NumberFormatException nfe blank-num)))])))
+
+(defn interpret-numeric-records
+  [record]
+  (into {} (for [[k v] record
+                 :let [blnk (get-in relevant-fields [k :blank 0])
+                       interp (get-in relevant-fields [k :interp-fn] identity)]]
+             [k (if (= blank-num v) blnk (interp v))])))
 
 (defn inc-counts-for-keys
   [counts xs]
@@ -882,13 +889,18 @@
 (def field-sets
   (into {} (map (fn [k] [k #{}]) field-set)))
 
+(def field-extremes
+  (into {} (map (fn [k] [k {:min Integer/MAX_VALUE
+                            :max Integer/MIN_VALUE}]) field-set)))
+
 (defn transform-to-common-invalids
   [rec]
   (into {} (for [[k v] rec]
              [k (if (or
                       (= :nfe-error v)
                       (= :nil-error v)
-                      (= (get-in relevant-fields [k :blank 0]) v)) -1 v)])))
+                      (= (get-in relevant-fields [k :blank 0]) v))
+                  -1 v)])))
 
 (defn summarize-record-validity
   [record-seq]
@@ -907,15 +919,78 @@
      :blank-per-record-histo field-count-histogram}
     record-seq))
 
-(with-open [rdr (clojure.java.io/reader
-                  (get-in parsed [1 1]))]
-  (->> rdr
-    buff-seq
-    (map buff-to-relevant-fields)
-    (map transform-to-common-invalids)
-    (take 1000)
-    summarize-record-validity
-    pp/pprint))
+(defn accum-extremal-values
+  [accum nxt]
+  (into {} (for [[k old-v] accum]
+             [k (-> old-v
+                  (update-in [:min] min (nxt k))
+                  (update-in [:max] max (nxt k)))])))
+
+(defn extremal-values
+  [rec-seq]
+  (reduce accum-extremal-values field-extremes rec-seq))
+
+(def numeric-types
+  [{:min Byte/MIN_VALUE
+    :max Byte/MAX_VALUE
+    :name "sbyte" :fn bbb/put-byte :sz 1}
+   {:min Short/MIN_VALUE
+    :max Short/MAX_VALUE
+    :name "sshort" :fn bbb/put-short :sz 2}
+   {:min Integer/MIN_VALUE
+    :max Integer/MAX_VALUE
+    :name "sint" :fn bbb/put-int :sz 4}])
+
+(defn find-smallest-containing-type
+  [{mn :min mx :max}]
+  (some (fn [{tmin :min tmax :max :as tp}]
+          (if (and (<= mx tmax) (>= mn tmin)) tp nil))
+        numeric-types))
+
+(defn file-name-for-field
+  [prefix kw out-type]
+  (str prefix
+       (-> kw
+         name
+         clojure.string/lower-case)
+       "-"
+       (out-type :name)))
+
+(defn open-bbs-for-fields
+  [numeric-seq out-types]
+  (let [cnt (count numeric-seq)]
+    (into {}
+          (for [[k v] out-types]
+            [k (bbb/byte-buffer (* (get-in out-types [k :sz]) cnt))]))))
+
+(defn copy-numeric-seq-to-bbs
+  [numeric-seq out-types]
+  (do-let [bbs (open-bbs-for-fields numeric-seq out-types)]
+          (doseq [rec numeric-seq [k v] rec]
+            ((get-in out-types [k :fn]) (bbs k) v))
+          (doseq [[k bb] bbs]
+            (.flip bb))))
+
+(defn write-out-bbs-for-fields
+  [out-types bbs]
+     (doseq [[k bb] bbs]
+     (-> (file-name-for-field "raw-out/" k (out-types k))
+       (File.)
+       (FileOutputStream.)
+       (.getChannel)
+       (.write bb))))
+
+(with-open [rdr (clojure.java.io/reader (get-in parsed [1 1]))]
+  (let [numeric-seq (->> rdr
+                      buff-seq
+                      (take 1000)
+                      (map buff-to-relevant-fields-numeric-records))
+        out-types (map-vals find-smallest-containing-type
+                            (extremal-values numeric-seq))
+        bbs (copy-numeric-seq-to-bbs numeric-seq out-types)]
+    (write-out-bbs-for-fields out-types bbs)
+  ;  (pp/pprint extremes)
+    ))
 
 ; ; Chunk up a list of col positions/codes/lengths into clojure table
 ; (with-open [rdr (clojure.java.io/reader (get-in parsed [1 1]))]
