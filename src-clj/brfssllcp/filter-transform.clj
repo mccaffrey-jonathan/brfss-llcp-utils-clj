@@ -1,7 +1,7 @@
 (ns brfss-llcp.filter-transform
   (:require [clojure.set :as set]
             [clojure.pprint :as pp]
-            [brfss-llcp.data-model :as model])
+            [brfssllcp.datamodel :as model])
   (:use 
     clojure.java.io
     clojure.string

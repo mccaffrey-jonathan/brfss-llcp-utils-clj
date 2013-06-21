@@ -7,12 +7,16 @@
                  [org.clojure/clojure "1.5.1"]
                  [org.clojure/tools.cli "0.2.2"]
                  [ring "1.1.8"]
-                 [ring.middleware.logger "0.4.0"]]
+                 [ring.middleware.logger "0.4.0"]
+                 [jayq "2.3.0"] ]
   :plugins [[lein-cljsbuild "0.3.2"]
             [lein-exec "0.3.0"]
             [lein-ring "0.8.5"]]
   :cljsbuild {
+    :crossovers [brfssllcp.datamodel]
+
     :builds [{:source-paths ["src-cljs"]
+              ; :incremental false
               :compiler {:output-to "resources/public/js/main.js"
                          :optimizations :whitespace
                          :pretty-print true}}]}

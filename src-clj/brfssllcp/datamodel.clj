@@ -1,4 +1,4 @@
-(ns brfss-llcp.data-model )
+(ns brfssllcp.datamodel )
 
 (def record-extraction-map
   {:SLEPDRIV {:starting-col 306, :field-len 1},
@@ -590,22 +590,32 @@
              4 "Out of work for less that 1 year"
              5 "A homemaker"
              6 "A student"
-             7 "Retired"
-             8 "Unable to work"
+             7 "Retired" 8 "Unable to work"
              9 "Refused"}}
    :INCOME2 {:desc "Is your annual household income from all sources"
              :blank [nil "Not asked or missing"]
              :val-to-str 
-             {1 "Less than $10,000"
-              2 "Less than $15,000 ($10,000 to less than $15,000)"
-              3 "Less than $20,000 ($15,000 to less than $20,000)"
-              4 "Less than $25,000 ($20,000 to less than $25,000)"
-              5 "Less than $35,000 ($25,000 to less than $35,000)"
-              6 "Less than $50,000 ($35,000 to less than $50,000)"
-              7 "Less than $75,000 ($50,000 to less than $75,000)"
-              8 "$75,000 or more"
+;             {1 "Less than $10,000"
+;              2 "Less than $15,000 ($10,000 to less than $15,000)"
+;              3 "Less than $20,000 ($15,000 to less than $20,000)"
+;              4 "Less than $25,000 ($20,000 to less than $25,000)"
+;              5 "Less than $35,000 ($25,000 to less than $35,000)"
+;              6 "Less than $50,000 ($35,000 to less than $50,000)"
+;              7 "Less than $75,000 ($50,000 to less than $75,000)"
+;              8 "$75,000 or more"
+;              77 "Don’t know/Not sure"
+;              99 "Refused"}
+             {1 "<$10K"
+              2 "$10K-$15K"
+              3 "$15K-$20K"
+              4 "$20K-$25K"
+              5 "$25K-$35K"
+              6 "$35K-$50K"
+              7 "$50K-$75K"
+              8 ">$75K"
               77 "Don’t know/Not sure"
-              99 "Refused"}}
+              99 "Refused"}
+             }
    :ORACE2 {:desc "Which one of these groups would you say best represents your race?"
             :blank [nil "Not asked or missing"]
             :val-to-str
@@ -752,7 +762,7 @@
                                              (get-in relevant-fields [k :blank 0])
                                              v)]
                                  k))
-        invalid-fields (set/union nfe-fields nil-fields blank-fields)
+        invalid-fields (clojure.set/union nfe-fields nil-fields blank-fields)
         invalid-count (count invalid-fields)]
     (-> accum
       (update-in [:total-seen] inc)
@@ -791,9 +801,13 @@
 (def field-sets
   (into {} (map (fn [k] [k #{}]) field-set)))
 
+
+(def large-int 1000000)
+(def small-int -1000000)
+
 (def field-extremes
-  (into {} (map (fn [k] [k {:min Integer/MAX_VALUE
-                            :max Integer/MIN_VALUE}]) field-set)))
+  (into {} (map (fn [k] [k {:min large-int
+                            :max small-int}]) field-set)))
 
 (defn transform-to-common-invalids
   [rec]
@@ -831,3 +845,13 @@
 (defn extremal-values
   [rec-seq]
   (reduce accum-extremal-values field-extremes rec-seq))
+
+(defn int-encoding-to-str
+  [kw k]
+  (let [blank-str (get-in relevant-fields [kw :blank 1])]
+    (if (= blank-num k)
+      blank-str
+      (let [interped-k ((get-in relevant-fields [kw :interp-fn] identity) k)]
+        (if interped-k
+          ((get-in relevant-fields [kw :val-to-str]) interped-k)
+          blank-str)))))
