@@ -6,10 +6,22 @@
 
 (def filter-span
   [:span {:class "reset"}
-          "Current filter: " [:span {:class "filter"}]])
+          "current filter: "
+   [:span {:class "filter"}]])
+
+(def filter-count-span
+  [:span "pass filter: "
+   [:span {:class "filter-valid-count"}]])
 
 (def count-span
-  [:span [:span {:class "valid-count"}] " valid records"])
+   [:span "valid records: "
+    [:span {:class "valid-count"}]])
+
+(def filter-and-count
+  [:div
+   filter-count-span
+   count-span])
+
 
 (defn index-page []
   (html5
@@ -50,37 +62,40 @@
         ;     <span class="reset" style="display: none;">Current filter: <span class="filter"></span></span>
         ; </div>
 
-        ]]
+        ]
+       filter-and-count ]
 
       [:div {:id "income-histogram"}
-       [:div "Household Income"]]
+       [:div "Household Income"]
+       filter-and-count ]
       [:div {:id "bmi-histogram"}
-       [:div "Body Mass Index (BMI)"]]]
+       [:div "Body Mass Index (BMI)"]
+       filter-and-count ]]
 
      ; Demographic Pies
      [:div ; div to stack the rows of pie charts
       [:div {:style "display: inline-block"}
        [:div {:id "race-pie"}
         [:div "Race"] 
-        count-span ]
+        filter-and-count ]
        [:div {:id "employment-pie"}
         [:div "Employment Status"] 
-        count-span ]
+        filter-and-count ]
        [:div {:id "education-pie"}
         [:div "Educational Attainment"]
-        count-span ] ]
+        filter-and-count ] ]
 
       ; Lifestyle pies
       [:div {:style "display: inline-block"}
        [:div {:id "exercise-pie"}
         [:div "Primary Exercise Frequency"]
-        count-span ]
+        filter-and-count ]
        [:div {:id "alcohol-pie"}
         [:div "Alcohol Consumption"] 
-        count-span ]
+        filter-and-count ]
        [:div {:id "smoking-pie"}
         [:div "Smoking Frequency"] 
-        count-span ] ] ]
+        filter-and-count ] ] ]
 
      ; Data count
      [:div {:id "data-count"}

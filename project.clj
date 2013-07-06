@@ -13,7 +13,8 @@
             [lein-exec "0.3.0"]
             [lein-ring "0.8.5"]]
   :cljsbuild {
-    :crossovers [brfssllcp.datamodel]
+    :crossovers [brfssllcp.datamodel
+                 example.cljsmacros ]
 
     :builds [{:source-paths ["src-cljs"]
               ; :incremental false

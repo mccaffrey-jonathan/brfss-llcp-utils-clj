@@ -1,6 +1,7 @@
 (ns example.hello
   (:require [clojure.string :as string]
             [brfssllcp.datamodel :as dm])
+  (:require-macros [example.cljsmacros :as mac])
   (:use [jayq.core :only [$ css inner]]))
 
 (def file-list
@@ -55,8 +56,9 @@
   (console-log s)
   s)
 
-(console-log "loading hello.cljs")
-
+; (mac/defn-log
+;   console-log
+;   console-log-clj
 (defn console-log-clj
   [& ss]
   (doseq [s ss] 
@@ -133,14 +135,26 @@
      :max (aget (aget (.top dim 1) 0) tag)}))
 
 (defn update-count
-  [anchor-tag group-all]
+  [anchor-tag group-all-filtered group-all]
   (fn [_]
-    (-> (str anchor-tag" > .valid-count")
+    (console-log "update-count")
+    (-> (str anchor-tag " .valid-count")
       $
-      (inner (.value group-all)))))
+      (inner (.value group-all)))
+    (-> (str anchor-tag " .filter-valid-count")
+      $
+      (inner (-> group-all-filtered
+               (.top 1)
+               (aget 0)
+               (.-value))))))
 
 (defn make-age-histogram
-  [anchor-tag chart-group age-dim age-group-count age-group-all-count]
+  [anchor-tag
+   chart-group
+   age-dim
+   age-group-count
+   age-group-all-filtered-count
+   age-group-all-count]
   (print-dimension-min-max "AGE" age-dim)
   (doto (.barChart js/dc anchor-tag chart-group)
     (.dimension age-dim)
@@ -154,10 +168,18 @@
     (.y (percentage-scale 50))
     (.centerBar true)
     (.title #(str (.-value %) " years old"))
-    (.on "preRender" (update-count anchor-tag age-group-all-count)))
+    (.on "filtered" (update-count
+                      anchor-tag
+                      age-group-all-filtered-count
+                      age-group-all-count)))
 
 (defn make-income-histogram
-  [anchor-tag chart-group income-dim income-group-count income-group-all-count]
+  [anchor-tag
+   chart-group
+   income-dim
+   income-group-count
+   income-group-all-filtered-count
+   income-group-all-count]
   (print-dimension-min-max "INCOME2" income-dim)
   (doto (.barChart js/dc anchor-tag chart-group)
     (.dimension income-dim)
@@ -172,15 +194,23 @@
     (.y (percentage-scale 50))
     ; TODO finish
     (.title (fn [d]
-              (console-log (dm/int-encoding-to-str :INCOME2 (.-key d)))
+              ; (console-log (dm/int-encoding-to-str :INCOME2 (.-key d)))
               (dm/int-encoding-to-str :INCOME2 (.-key d))
               ))
     (.renderTitle true)
     (.centerBar true)
-    (.on "preRender" (update-count anchor-tag income-group-all-count)))))
+    (.on "preRender" (update-count
+                       anchor-tag 
+                       income-group-all-filtered-count
+                       income-group-all-count)))))
 
 (defn make-bmi-histogram
-  [anchor-tag chart-group bmi-dim bmi-group-count bmi-group-all-count]
+  [anchor-tag
+   chart-group
+   bmi-dim
+   bmi-group-count
+   bmi-group-all-filtered-count
+   bmi-group-all-count]
   (print-dimension-min-max "_BMI5" bmi-dim)
   (doto (.barChart js/dc anchor-tag chart-group)
     (.dimension bmi-dim)
@@ -194,12 +224,15 @@
     (.y (percentage-scale 50))
     ; TODO finish
     (.centerBar true)
-    (.on "preRender" (update-count anchor-tag bmi-group-all-count))))
+    (.on "preRender" (update-count
+                       anchor-tag
+                       bmi-group-all-filtered-count
+                       bmi-group-all-count))))
 
 ; TODO chronic conditions chart; draw at work
 
 (defn make-basic-pie
-  [anchor-tag chart-group dim group group-all]
+  [anchor-tag chart-group dim group group-all-filtered group-all]
   (doto (.pieChart js/dc anchor-tag chart-group)
     (.width 200)
     (.height 200)
@@ -213,7 +246,10 @@
     ; TODO pretty-print
     (.title #(-> %1 (.-data) (.-key)))
     (.renderTitle true)
-    (.on "preRender" (update-count anchor-tag group-all))))
+    (.on "preRender" (update-count
+                       anchor-tag
+                       group-all-filtered
+                       group-all))))
 
 (defn str-for-pie-slice
   [kw]
@@ -263,13 +299,19 @@
        (.group)
        ((reduceValidCount dim-fn) ))]))
 
+(defn zero-bucket [_] 0)
+
 ; TODO!  Group-all should not ignore all filters!
 (defn dim-count-all-count
   [ndx dim-fn]
   (let [[dim & _ :as inner-vec] (dim-count ndx dim-fn)]
-    (conj inner-vec (-> dim
-                      (.groupAll)
-                      ((reduceValidCount dim-fn) )))))
+    (-> inner-vec
+      (conj (-> dim
+              (.group (fn [_] 0))
+              ((reduceValidCount dim-fn) )))
+      (conj (-> dim
+              (.groupAll)
+              ((reduceValidCount dim-fn) ))))))
 
 (defn make-data-count
   [anchor-tag chart-group ndx group]
@@ -281,56 +323,33 @@
 (defn setup-crossfilter
   [data]
   (let [ndx (js/crossfilter data)
-        all (.groupAll ndx)
-        [age-dim age-group-count age-group-all-count]
-        (dim-count-all-count ndx (fn [d] (aget d "AGE")))
-        [income-dim income-group-count income-group-all-count]
-        (dim-count-all-count ndx (fn [d] (aget d "INCOME2")))
-        [bmi-dim bmi-group-count bmi-group-all-count]
-        (dim-count-all-count ndx (fn [d] (aget d "_BMI5")))
-        [race-dim race-group-count race-group-all-count]
-        (dim-count-all-count ndx (fn [d] (aget d "ORACE2")))
-        [education-dim education-group-count education-group-all-count]
-        (dim-count-all-count ndx (fn [d] (aget d "EDUCA")))
-        [employment-dim employment-group-count employment-group-all-count]
-        (dim-count-all-count ndx (fn [d] (aget d "EMPLOY")))
-        [exercise-dim exercise-group-count exercise-group-all-count]
-        (dim-count-all-count ndx (fn [d] (aget d "EXEROFT1")))
-        [alcohol-dim alcohol-group-count alcohol-group-all-count]
-        (dim-count-all-count ndx (fn [d] (aget d "ALCDAY5")))
-        [smoking-dim smoking-group-count smoking-group-all-count]
-        (dim-count-all-count ndx (fn [d] (aget d "SMOKDAY2")))
-        ;
-        ]
+        all (.groupAll ndx)]
 
     ; TODO make this less like code and more like data
-    (make-age-histogram "#age-histogram" brfss-llcp-chart-group
-      age-dim age-group-count age-group-all-count)
-    (make-income-histogram "#income-histogram" brfss-llcp-chart-group
-      income-dim income-group-count income-group-all-count)
-    (make-bmi-histogram "#bmi-histogram" brfss-llcp-chart-group
-      bmi-dim bmi-group-count bmi-group-all-count)
+    (apply make-age-histogram "#age-histogram" brfss-llcp-chart-group
+           (dim-count-all-count ndx (fn [d] (aget d "AGE"))))
+    (apply make-income-histogram "#income-histogram" brfss-llcp-chart-group
+           (dim-count-all-count ndx (fn [d] (aget d "INCOME2"))))
+    (apply make-bmi-histogram "#bmi-histogram" brfss-llcp-chart-group
+           (dim-count-all-count ndx (fn [d] (aget d "_BMI5"))))
 
-    (make-race-pie "#race-pie" brfss-llcp-chart-group
-      race-dim race-group-count race-group-all-count)
-    (make-education-pie "#education-pie" brfss-llcp-chart-group
-      education-dim education-group-count education-group-all-count)
-    (make-employment-pie "#employment-pie" brfss-llcp-chart-group
-      employment-dim employment-group-count employment-group-all-count)
+    (apply make-race-pie "#race-pie" brfss-llcp-chart-group
+           (dim-count-all-count ndx (fn [d] (aget d "ORACE2"))))
+    (apply make-education-pie "#education-pie" brfss-llcp-chart-group
+           (dim-count-all-count ndx (fn [d] (aget d "EDUCA"))))
+    (apply make-employment-pie "#employment-pie" brfss-llcp-chart-group
+        (dim-count-all-count ndx (fn [d] (aget d "EMPLOY"))))
 
-    ((make-kw-labeled-pie :EXEROFT1) "#exercise-pie" brfss-llcp-chart-group
-      race-dim race-group-count race-group-all-count)
-    ((make-kw-labeled-pie :ALCDAY5) "#alcohol-pie" brfss-llcp-chart-group
-      education-dim education-group-count education-group-all-count)
-    ((make-kw-labeled-pie :SMOKDAY2) "#smoking-pie" brfss-llcp-chart-group
-      employment-dim employment-group-count employment-group-all-count)
+    (apply (make-kw-labeled-pie :EXEROFT1) "#exercise-pie" brfss-llcp-chart-group
+           (dim-count-all-count ndx (fn [d] (aget d "EXEROFT1"))))
+    (apply (make-kw-labeled-pie :ALCDAY5) "#alcohol-pie" brfss-llcp-chart-group
+           (dim-count-all-count ndx (fn [d] (aget d "ALCDAY5"))))
+    (apply (make-kw-labeled-pie :SMOKDAY2) "#smoking-pie" brfss-llcp-chart-group
+           (dim-count-all-count ndx (fn [d] (aget d "SMOKDAY2"))))
 
     (make-data-count "#data-count" brfss-llcp-chart-group ndx all)
     (.renderAll js/dc brfss-llcp-chart-group)
-    (console-log "Done with crossfilter.")
-    ))
-
-(console-log "About to try loading a bunch of data")
+    (console-log "Done with crossfilter.")))
 
 (.map js/async
       (clj->js file-list)
@@ -341,13 +360,11 @@
           (set! (.-onload xhr2)
                 (fn [e]
                   (this-as this
-                           (cb nil(.-response this)))))
+                           (cb nil (.-response this)))))
           (.send xhr2)))
       (fn [err res]
         (setup-crossfilter
           (clj->js
             (package-array-buffers-to-aos file-list res)))))
-
-(console-log "At end of hello.cljs")
 
 ; TODO: add per-chart counts and filters to drop missing data!
